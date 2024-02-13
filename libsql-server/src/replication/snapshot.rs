@@ -554,7 +554,7 @@ mod test {
 
     use super::*;
 
-    async fn assert_dir_is_empty(p: &Path) {
+    async fn is_dir_is_empty(p: &Path) -> bool {
         // there is nothing left in the to_compact directory
         if p.try_exists().unwrap() {
             let mut dir = tokio::fs::read_dir(p).await.unwrap();
@@ -565,7 +565,9 @@ mod test {
                 }
             }
 
-            assert_eq!(count, 0);
+            count == 0
+        } else {
+            true
         }
     }
 
@@ -750,28 +752,28 @@ mod test {
         .await
         .unwrap();
 
-        // wait a bit for snapshot to be compated
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-
         // no error occured: the loop is still running.
         assert!(!compactor.sender.is_closed());
         assert!(tmp.path().join("snapshots").exists());
-        let mut dir = tokio::fs::read_dir(tmp.path().join("snapshots"))
-            .await
-            .unwrap();
         let mut start_idx = u64::MAX;
         let mut end_idx = u64::MIN;
-        while let Some(entry) = dir.next_entry().await.unwrap() {
-            if entry.file_type().await.unwrap().is_file() {
-                let (_, start, end) =
-                    parse_snapshot_name(entry.file_name().to_str().unwrap()).unwrap();
-                start_idx = start_idx.min(start);
-                end_idx = end_idx.max(end);
+        while end_idx != 9 {
+            let mut dir = tokio::fs::read_dir(tmp.path().join("snapshots"))
+                .await
+                .unwrap();
+            while let Some(entry) = dir.next_entry().await.unwrap() {
+                if entry.file_type().await.unwrap().is_file() {
+                    let name = entry.file_name();
+                    let name = name.to_str().unwrap();
+                    let (_, start, end) = parse_snapshot_name(name).unwrap();
+                    start_idx = start_idx.min(start);
+                    end_idx = end_idx.max(end);
+                }
             }
         }
 
         // assert that all indexes are covered
-        assert_eq!((start_idx, end_idx), (0, 9));
+        assert_eq!(start_idx, 0);
 
         assert_dir_is_empty(&to_compact_path).await;
     }
