@@ -18,13 +18,15 @@ include!(concat!(env!("OUT_DIR"), "/bindgen.rs"));
 
 #[derive(Clone, Debug)]
 pub enum Cipher {
+    // SQLCipher: AES 256 Bit (recommended)
+    SQLCIPHER,
     // AES 256 Bit CBC - No HMAC (wxSQLite3)
     AES_256_CBC,
 }
 
 impl Default for Cipher {
     fn default() -> Self {
-        Cipher::AES_256_CBC
+        Cipher::SQLCIPHER
     }
 }
 
@@ -33,6 +35,7 @@ impl FromStr for Cipher {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "sqlcipher" => Ok(Cipher::SQLCIPHER),
             "aes256cbc" => Ok(Cipher::AES_256_CBC),
             _ => Err(Error::new(SQLITE_MISUSE)),
         }
