@@ -1,4 +1,5 @@
 use crate::LIBSQL_PAGE_SIZE;
+use bytesize::mb;
 use url::Url;
 
 use libsql_replication::rpc::metadata;
@@ -19,10 +20,15 @@ pub struct DatabaseConfig {
     pub jwt_key: Option<String>,
     pub txn_timeout: Option<Duration>,
     pub allow_attach: bool,
+    pub max_row_size: u64,
 }
 
 const fn default_max_size() -> u64 {
     bytesize::ByteSize::pb(1000).as_u64() / LIBSQL_PAGE_SIZE
+}
+
+fn default_max_row_size() -> u64 {
+    mb(5u64)
 }
 
 impl Default for DatabaseConfig {
@@ -37,6 +43,7 @@ impl Default for DatabaseConfig {
             jwt_key: None,
             txn_timeout: Some(TXN_TIMEOUT),
             allow_attach: false,
+            max_row_size: default_max_row_size(),
         }
     }
 }
@@ -53,6 +60,7 @@ impl From<&metadata::DatabaseConfig> for DatabaseConfig {
             jwt_key: value.jwt_key.clone(),
             txn_timeout: value.txn_timeout_s.map(Duration::from_secs),
             allow_attach: value.allow_attach,
+            max_row_size: value.max_row_size.unwrap_or_else(default_max_row_size),
         }
     }
 }
@@ -69,6 +77,7 @@ impl From<&DatabaseConfig> for metadata::DatabaseConfig {
             jwt_key: value.jwt_key.clone(),
             txn_timeout_s: value.txn_timeout.map(|d| d.as_secs()),
             allow_attach: value.allow_attach,
+            max_row_size: Some(value.max_row_size),
         }
     }
 }
