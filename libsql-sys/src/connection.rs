@@ -3,6 +3,10 @@ use std::path::Path;
 
 use crate::wal::{ffi::make_wal_manager, Wal, WalManager};
 
+pub type Cipher = libsql_ffi::Cipher;
+
+pub type EncryptionConfig = libsql_ffi::EncryptionConfig;
+
 #[cfg(not(feature = "rusqlite"))]
 type RawConnection = *mut crate::ffi::sqlite3;
 #[cfg(feature = "rusqlite")]
@@ -54,6 +58,11 @@ impl Connection<crate::wal::Sqlite3Wal> {
 
 #[cfg(feature = "encryption")]
 extern "C" {
+    fn sqlite3mc_config(
+        db: *mut libsql_ffi::sqlite3,
+        cipher: *const std::ffi::c_void,
+        nKey: std::ffi::c_int,
+    ) -> std::ffi::c_int;
     fn sqlite3_key(
         db: *mut libsql_ffi::sqlite3,
         pKey: *const std::ffi::c_void,
@@ -68,6 +77,13 @@ extern "C" {
     fn libsql_leak_pager(db: *mut libsql_ffi::sqlite3) -> *mut crate::ffi::Pager;
     fn libsql_generate_initial_vector(seed: u32, iv: *mut u8);
     fn libsql_generate_aes256_key(user_password: *const u8, password_length: u32, digest: *mut u8);
+}
+
+#[cfg(feature = "encryption")]
+/// # Safety
+/// db must point to a vaid sqlite database
+pub unsafe fn set_encryption_cipher(db: *mut libsql_ffi::sqlite3, cipher_id: i32) -> i32 {
+    unsafe { sqlite3mc_config(db, "cipher".as_ptr() as _, cipher_id) as i32 }
 }
 
 #[cfg(feature = "encryption")]
@@ -114,7 +130,7 @@ impl<W: Wal> Connection<W> {
         flags: OpenFlags,
         wal_manager: T,
         auto_checkpoint: u32,
-        encryption_key: Option<bytes::Bytes>,
+        encryption_config: Option<libsql_ffi::EncryptionConfig>,
     ) -> Result<Self, Error>
     where
         T: WalManager<Wal = W>,
@@ -141,7 +157,7 @@ impl<W: Wal> Connection<W> {
                 )
             }?;
 
-            if !cfg!(feature = "encryption") && encryption_key.is_some() {
+            if !cfg!(feature = "encryption") && encryption_config.is_some() {
                 return Err(Error::SqliteFailure(
                     rusqlite::ffi::Error::new(21),
                     Some("encryption feature is not enabled, the database will not be encrypted on disk"
@@ -149,8 +165,17 @@ impl<W: Wal> Connection<W> {
                 ));
             }
             #[cfg(feature = "encryption")]
-            if let Some(encryption_key) = encryption_key {
-                if unsafe { set_encryption_key(conn.handle(), &encryption_key) }
+            if let Some(cfg) = encryption_config {
+                let cipher_id = cfg.cipher_id();
+                if unsafe { set_encryption_cipher(conn.handle(), cipher_id) }
+                    != rusqlite::ffi::SQLITE_OK
+                {
+                    return Err(Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(21),
+                        Some("failed to set encryption cipher".into()),
+                    ));
+                };
+                if unsafe { set_encryption_key(conn.handle(), &cfg.encryption_key) }
                     != rusqlite::ffi::SQLITE_OK
                 {
                     return Err(Error::SqliteFailure(
@@ -199,16 +224,20 @@ impl<W: Wal> Connection<W> {
                 make_wal_manager(wal_manager),
             );
 
-            if !cfg!(feature = "encryption") && encryption_key.is_some() {
+            if !cfg!(feature = "encryption") && encryption_config.is_some() {
                 return Err(Error::Bug(
                     "encryption feature is not enabled, the database will not be encrypted on disk",
                 ));
             }
             #[cfg(feature = "encryption")]
-            if let Some(encryption_key) = encryption_key {
-                if set_encryption_key(conn, &encryption_key) != libsql_ffi::SQLITE_OK {
+            if let Some(cfg) = encryption_config {
+                let cipher_id = cfg.cipher_id();
+                if set_encryption_cipher(conn, cipher_id) != libsql_ffi::SQLITE_OK {
+                    return Err(Error::Bug("failed to set encryption cipher"));
+                }
+                if set_encryption_key(conn, &cfg.encryption_key) != libsql_ffi::SQLITE_OK {
                     return Err(Error::Bug("failed to set encryption key"));
-                };
+                }
             }
 
             if rc == 0 {

@@ -23,6 +23,7 @@ use libsql_server::config::{
 use libsql_server::net::AddrIncoming;
 use libsql_server::Server;
 use libsql_server::{connection::dump::exporter::export_dump, version::Version};
+use libsql_sys::{Cipher, EncryptionConfig};
 
 // Use system allocator for now, seems like we are getting too much fragmentation.
 // #[global_allocator]
@@ -288,7 +289,7 @@ impl Cli {
         eprintln!("\t- listening for HTTP requests on: {}", self.http_listen_addr);
         eprintln!("\t- grpc_tls: {}", if self.grpc_tls { "yes" } else { "no" });
         #[cfg(feature = "encryption")]
-        eprintln!("\t- encryption at rest: {}", if self.encryption_key.is_some() { "enabled" } else { "disabled" });
+        eprintln!("\t- encryption at rest: {}", if self.encryption_config.is_some() { "enabled" } else { "disabled" });
     }
 }
 
@@ -335,14 +336,18 @@ fn enable_libsql_logging() {
 }
 
 fn make_db_config(config: &Cli) -> anyhow::Result<DbConfig> {
+    let encryption_config = config.encryption_key.as_ref().map(|key| EncryptionConfig {
+        cipher: Cipher::AES_256_CBC,
+        encryption_key: key.clone(),
+    });
     let mut bottomless_replication = config
         .enable_bottomless_replication
         .then(bottomless::replicator::Options::from_env)
         .transpose()?;
     // Inherit encryption key for bottomless from the db config, if not specified.
     if let Some(ref mut bottomless_replication) = bottomless_replication {
-        if bottomless_replication.encryption_key.is_none() {
-            bottomless_replication.encryption_key = config.encryption_key.clone();
+        if bottomless_replication.encryption_config.is_none() {
+            bottomless_replication.encryption_config = encryption_config.clone();
         }
     }
     Ok(DbConfig {
@@ -357,7 +362,7 @@ fn make_db_config(config: &Cli) -> anyhow::Result<DbConfig> {
         snapshot_exec: config.snapshot_exec.clone(),
         checkpoint_interval: config.checkpoint_interval_s.map(Duration::from_secs),
         snapshot_at_shutdown: config.snapshot_at_shutdown,
-        encryption_key: config.encryption_key.clone(),
+        encryption_config: encryption_config.clone(),
         max_concurrent_requests: config.max_concurrent_requests,
     })
 }

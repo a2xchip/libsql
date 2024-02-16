@@ -7,6 +7,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::c_int;
+use std::str::FromStr;
 
 #[cfg(feature = "wasmtime-bindings")]
 pub use libsql_wasm::{
@@ -14,6 +15,51 @@ pub use libsql_wasm::{
 };
 
 include!(concat!(env!("OUT_DIR"), "/bindgen.rs"));
+
+#[derive(Clone, Debug)]
+pub enum Cipher {
+    // AES 256 Bit CBC - No HMAC (wxSQLite3)
+    AES_256_CBC,
+}
+
+impl Default for Cipher {
+    fn default() -> Self {
+        Cipher::AES_256_CBC
+    }
+}
+
+impl FromStr for Cipher {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "aes256cbc" => Ok(Cipher::AES_256_CBC),
+            _ => Err(Error::new(SQLITE_MISUSE)),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EncryptionConfig {
+    pub cipher: Cipher,
+    pub encryption_key: bytes::Bytes,
+}
+
+impl EncryptionConfig {
+    pub fn new(cipher: Cipher, encryption_key: bytes::Bytes) -> Self {
+        Self {
+            cipher,
+            encryption_key,
+        }
+    }
+
+    pub fn cipher_id(&self) -> c_int {
+        match self.cipher {
+            Cipher::AES_256_CBC => 2, // CODEC_TYPE_AES256
+            Cipher::SQLCIPHER => 4,   // CODEC_TYPE_SQLCIPHER
+        }
+    }
+}
 
 #[must_use]
 pub fn SQLITE_STATIC() -> sqlite3_destructor_type {
